@@ -3,6 +3,9 @@ package com.yourcompany.parallelspace.ui
 
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
+import android.graphics.drawable.Drawable
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -24,9 +27,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-
         cloneManager = CloneManager(this)
-
         setupRecyclerView()
         setupFab()
         refreshClones()
@@ -34,114 +35,105 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupRecyclerView() {
         adapter = CloneGridAdapter(mutableListOf()) { clone ->
-            // Click on clone → launch with full spoofing
             cloneManager.launchClone(clone)
-            Toast.makeText(this, 
-                "Launching ${clone.appName}\n🔐 Device: ${clone.identity.model}\n📱 ID: ${clone.identity.deviceId.take(10)}...\n📶 MAC: ${clone.identity.wifiMac}\n🆔 ADID: ${clone.identity.advertisingId.take(10)}...", 
+            Toast.makeText(this,
+                "Launching ${clone.appName}\n" +
+                "Device: ${clone.identity.model}\n" +
+                "ID: ${clone.identity.deviceId.take(10)}...\n" +
+                "MAC: ${clone.identity.wifiMac}",
                 Toast.LENGTH_LONG).show()
         }
-        
         binding.recyclerClones.apply {
             layoutManager = GridLayoutManager(this@MainActivity, 3)
             adapter = this@MainActivity.adapter
         }
-        
-        adapter.setOnLongClickListener { clone ->
-            showCloneOptions(clone)
-        }
+        adapter.setOnLongClickListener { clone -> showCloneOptions(clone) }
     }
 
     private fun setupFab() {
-        binding.fabAdd.setOnClickListener {
-            showAppSelectionDialog()
-        }
+        binding.fabAdd.setOnClickListener { showAppSelectionDialog() }
     }
 
     private fun refreshClones() {
         val clones = cloneManager.getAllClones()
         adapter.updateList(clones)
-        
         binding.emptyState.visibility = if (clones.isEmpty()) android.view.View.VISIBLE else android.view.View.GONE
         binding.recyclerClones.visibility = if (clones.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE
-        
-        // Update subtitle
         val grantedCount = CloneManager.GRANTED_PERMISSIONS.size
         binding.tvSubtitle.text = "${clones.size} clones • $grantedCount permissions granted"
     }
 
     private fun showAppSelectionDialog() {
-        // Get installed apps
         val pm = packageManager
         val intent = Intent(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
-        val activities = pm.queryIntentActivities(intent, 0)
-        
+
+        // FIX: API 33+ requires PackageManager.ResolveInfoFlags
+        val activities: List<ResolveInfo> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            pm.queryIntentActivities(intent, PackageManager.ResolveInfoFlags.of(0))
+        } else {
+            @Suppress("DEPRECATION")
+            pm.queryIntentActivities(intent, 0)
+        }
+
+        data class AppEntry(val packageName: String, val appName: String, val icon: Drawable)
+
         val apps = activities
             .map { resolveInfo ->
-                val pkg = resolveInfo.activityInfo.packageName
-                val name = resolveInfo.loadLabel(pm).toString()
-                val icon = resolveInfo.loadIcon(pm)
-                Triple(pkg, name, icon)
+                AppEntry(
+                    packageName = resolveInfo.activityInfo.packageName,
+                    appName = resolveInfo.loadLabel(pm).toString(),
+                    icon = resolveInfo.loadIcon(pm)
+                )
             }
-            .distinctBy { it.first }
-            .sortedBy { it.second }
-        
-        val appNames = apps.map { it.second }.toTypedArray()
-        val icons = apps.map { it.third }
-        
-        val dialog = AlertDialog.Builder(this)
+            .distinctBy { it.packageName }
+            .filter { it.packageName != this.packageName }
+            .sortedBy { it.appName }
+
+        val appNames = apps.map { it.appName }.toTypedArray()
+
+        AlertDialog.Builder(this)
             .setTitle("Select App to Clone")
             .setItems(appNames) { _, which ->
-                val (packageName, appName, icon) = apps[which]
-                createNewClone(packageName, appName, icon)
+                val entry = apps[which]
+                createNewClone(entry.packageName, entry.appName, entry.icon)
             }
             .setNegativeButton("Cancel", null)
             .create()
-        
-        dialog.show()
+            .show()
     }
 
-    private fun createNewClone(packageName: String, appName: String, icon: android.graphics.drawable.Drawable?) {
-        // Har baar new clone with FRESH random identity
+    private fun createNewClone(packageName: String, appName: String, icon: Drawable?) {
         val clone = cloneManager.createClone(packageName)
-        
-        // Show identity summary
         showIdentitySummary(clone)
-        
         refreshClones()
     }
 
     private fun showIdentitySummary(clone: AppClone) {
         val identity = clone.identity
-        
         AlertDialog.Builder(this)
-            .setTitle("✅ ${clone.appName} Created")
-            .setMessage("""
-                ── NEW RANDOM IDENTITY ──
-                
-                📱 Model: ${identity.brand} ${identity.model}
-                🆔 Device ID: ${identity.deviceId}
-                📱 IMEI: ${identity.imei}
-                📶 WiFi MAC: ${identity.wifiMac}
-                🔵 BT MAC: ${identity.bluetoothMac}
-                🆔 Android ID: ${identity.androidId}
-                🆔 AD ID (GAID): ${identity.advertisingId}
-                📍 Locale: ${identity.locale}
-                🕐 Timezone: ${identity.timezone}
-                🌍 Country: ${identity.country}
-                
-                ✅ 21 Permissions: ALL GRANTED
-                🔐 Google Accounts: HIDDEN
-            """.trimIndent())
-            .setPositiveButton("Launch", null) { _, _ ->
-                cloneManager.launchClone(clone)
-            }
+            .setTitle("${clone.appName} Created")
+            .setMessage(
+                "── NEW RANDOM IDENTITY ──\n\n" +
+                "Model: ${identity.brand} ${identity.model}\n" +
+                "Device ID: ${identity.deviceId}\n" +
+                "IMEI: ${identity.imei}\n" +
+                "WiFi MAC: ${identity.wifiMac}\n" +
+                "BT MAC: ${identity.bluetoothMac}\n" +
+                "Android ID: ${identity.androidId}\n" +
+                "AD ID (GAID): ${identity.advertisingId}\n" +
+                "Locale: ${identity.locale}\n" +
+                "Timezone: ${identity.timezone}\n" +
+                "Country: ${identity.country}\n\n" +
+                "21 Permissions: ALL GRANTED\n" +
+                "Google Accounts: HIDDEN"
+            )
+            .setPositiveButton("Launch") { _, _ -> cloneManager.launchClone(clone) }
             .setNegativeButton("Close", null)
             .show()
     }
 
     private fun showCloneOptions(clone: AppClone) {
         val options = arrayOf("Launch", "View Permissions", "View Identity", "Delete Clone")
-        
         AlertDialog.Builder(this)
             .setTitle(clone.appName)
             .setItems(options) { _, which ->
