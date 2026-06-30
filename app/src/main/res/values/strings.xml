@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">Parallel Space Clone</string>
+    <string name="clone_apps">Clone Apps</string>
+    <string name="no_clones">No cloned apps yet</string>
+    <string name="add_clone">Add Clone</string>
+    <string name="launch">Launch</string>
+    <string name="delete_clone">Delete Clone</string>
+    <string name="clone_info">Clone Info</string>
+    <string name="package_name">Package Name</string>
+    <string name="app_cloned_success">App cloned successfully</string>
+    <string name="app_clone_failed">Failed to clone app</string>
+</resources>
